@@ -171,9 +171,9 @@ for name in "${NAMES[@]}"; do
     rmdir "$empty"
   fi
   new_b="$(require_stat 'Total transferred file size' "$out")" \
-    || die "Could not read rsync statistics for $name (unexpected rsync output). Run ./preflight.sh"
+    || die "Could not read rsync statistics for $name (unexpected rsync output). Run: sudo bash preflight.sh"
   del_n="$(require_stat 'Number of deleted files' "$out")" \
-    || die "Could not read rsync statistics for $name (unexpected rsync output). Run ./preflight.sh"
+    || die "Could not read rsync statistics for $name (unexpected rsync output). Run: sudo bash preflight.sh"
   log "  $name: $(hr "$new_b") to copy, $del_n files to delete from the drive copy"
   TOTAL_NEW=$(( TOTAL_NEW + new_b ))
   TOTAL_DEL=$(( TOTAL_DEL + del_n ))
@@ -187,7 +187,7 @@ if (( NEEDED > AVAIL )); then
 fi
 
 if (( TOTAL_DEL > MAX_DELETE_FILES )) && (( ! FORCE )); then
-  die "Sync would delete $TOTAL_DEL files from the backup (limit $MAX_DELETE_FILES). If that is expected run: sudo $SCRIPT_DIR/backup.sh --force. If not, check the NAS filesystems are mounted."
+  die "Sync would delete $TOTAL_DEL files from the backup (limit $MAX_DELETE_FILES). If that is expected run: sudo bash $SCRIPT_DIR/backup.sh --force. If not, check the NAS filesystems are mounted."
 fi
 
 if (( DRY_RUN )); then

@@ -6,7 +6,7 @@
 # the way Immich documents, compares row counts with the live database, then
 # deletes the container and volume.
 #
-#   sudo ./verify-db-dump.sh [path/to/dump.sql.gz]
+#   sudo bash ./verify-db-dump.sh [path/to/dump.sql.gz]
 #
 # With no argument it tests the newest dump in <IMMICH_UPLOAD_LOCATION>/backups.
 # To test the one on your USB drive: ./verify-db-dump.sh /mnt/<drive>/current/db-dumps/immich-db-XXXX.sql.gz

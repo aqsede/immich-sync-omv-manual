@@ -13,12 +13,32 @@ OMV NAS (Immich + Portainer)  --(plug in drive)-->  btrfs USB drive
 
 ---
 
+## Before step 0: get the code onto the NAS (one time)
+
+Put the repo on the NAS's own disk, not on the USB drive. `/opt` is root-owned, so create the
+folder with sudo, hand it to your normal user, and clone as that user. After that, `git pull`
+never needs sudo:
+
+```bash
+sudo mkdir -p /opt/immich-usb-backup
+sudo chown "$USER": /opt/immich-usb-backup
+git clone <your-repo-url> /opt/immich-usb-backup
+cd /opt/immich-usb-backup
+```
+
+(Any folder works, for example `~/immich-usb-backup`; just use the same path everywhere. The
+scripts run as root, so only let your own admin account write to that folder.)
+
+**You never need `chmod +x`.** Every command here is written `sudo bash ./name.sh`, and the
+systemd unit starts the script through `/bin/bash`, so file permissions don't matter and git never
+sees permission changes. (`sudo ./name.sh` also works if your copy has the exec bit committed.)
+
 ## Step 0: create and fill in `.env`
 
 Every value that differs between machines lives in `.env`. Nothing else needs editing.
 
 ```bash
-cd /opt/immich-usb-backup              # the repo, on the NAS's own disk (not the USB drive)
+cd /opt/immich-usb-backup              # or wherever you cloned it
 cp .env.example .env
 chmod 600 .env                         # it may hold a webhook URL
 nano .env
@@ -51,24 +71,24 @@ The rest have sensible defaults:
 | `NOTIFY_WEBHOOK_URL` | empty | ntfy-style webhook. |
 | `LOG_FILE` | `/var/log/immich-usb-backup.log` | |
 
-Then check the values: `sudo ./preflight.sh`.
+Then check the values: `sudo bash ./preflight.sh`.
 
 ---
 
 ## Enabling it, in this order (install last)
 
-Run `chmod +x *.sh` once. Steps 1 to 6 change nothing on your Immich; the trigger is installed
-only in step 7, so your first full sync is one you watch.
+Steps 1 to 6 change nothing on your Immich; the trigger is installed only in step 7, so your
+first full sync is one you watch.
 
 | Step | Command | What it proves |
 |---|---|---|
-| 1 | `sudo ./preflight.sh` | Tools, paths, rsync's real output and filter behaviour (temp dirs), DB login, a `pg_dump` streamed to nowhere (size and time), drive present and btrfs. Read-only. |
-| 2 | `sudo ./verify-db-dump.sh` | Immich's newest dump restores into a throwaway, network-less Postgres and the row counts match live. Production untouched. |
-| 3 | Plug in the drive, `sudo ./backup.sh --dry-run` | Mount works, what would be copied, free space check, pending deletions. Changes nothing. |
-| 4 | `sudo systemd-run --unit=immich-first-backup ./backup.sh` then `journalctl -fu immich-first-backup` | The first real sync. `systemd-run` means an SSH drop can't kill it. For scale: about 80 minutes for 200 GB on the author's NAS. |
-| 5 | `sudo ./backup.sh --dry-run` again | It should say about 0 bytes to copy for Immich. |
-| 6 | `sudo ./verify-backup.sh` (add `--deep` once for a byte-for-byte compare) | Layout, snapshots read-only, file counts, your Portainer stack files and the host paths they expect, dump integrity, and the database restore test from the dump **on the drive**. Mounts the drive read-only. |
-| 7 | `sudo ./install.sh`, then `sudo ./preflight.sh` with the drive plugged in, then unplug and re-plug the drive | The udev trigger, end to end. Watch `journalctl -fu immich-usb-backup`. |
+| 1 | `sudo bash ./preflight.sh` | Tools, paths, rsync's real output and filter behaviour (temp dirs), DB login, a `pg_dump` streamed to nowhere (size and time), drive present and btrfs. Read-only. |
+| 2 | `sudo bash ./verify-db-dump.sh` | Immich's newest dump restores into a throwaway, network-less Postgres and the row counts match live. Production untouched. |
+| 3 | Plug in the drive, `sudo bash ./backup.sh --dry-run` | Mount works, what would be copied, free space check, pending deletions. Changes nothing. |
+| 4 | `sudo systemd-run --unit=immich-first-backup /bin/bash "$PWD/backup.sh"` then `journalctl -fu immich-first-backup` | The first real sync. `systemd-run` means an SSH drop can't kill it. For scale: about 80 minutes for 200 GB on the author's NAS. |
+| 5 | `sudo bash ./backup.sh --dry-run` again | It should say about 0 bytes to copy for Immich. |
+| 6 | `sudo bash ./verify-backup.sh` (add `--deep` once for a byte-for-byte compare) | Layout, snapshots read-only, file counts, your Portainer stack files and the host paths they expect, dump integrity, and the database restore test from the dump **on the drive**. Mounts the drive read-only. For `--deep` use `sudo systemd-run --unit=immich-verify /bin/bash "$PWD/verify-backup.sh" --deep` and `journalctl -fu immich-verify`. |
+| 7 | `sudo bash ./install.sh`, then `sudo bash ./preflight.sh` with the drive plugged in, then unplug and re-plug the drive | The udev trigger, end to end. Watch `journalctl -fu immich-usb-backup`. |
 | 8 | Optional, when you ever have a spare machine: full restore rehearsal from `RESTORE.md` | Everything coming back on fresh hardware. |
 
 Only delete anything from Google or your phone when you are comfortable. Step 8 is the one
@@ -81,7 +101,7 @@ thing nothing else here replaces (see "What is and isn't verified").
 1. Plug the drive in. 2. Wait for the email "done ... safe to unplug" (a few minutes when little
 changed, longer after big imports). 3. Unplug it and store it away.
 
-- Manual run any time: `sudo systemctl start immich-usb-backup`, or `sudo ./backup.sh`.
+- Manual run any time: `sudo systemctl start immich-usb-backup`, or `sudo bash ./backup.sh`.
 - Follow a run: `journalctl -fu immich-usb-backup` (also logged to `LOG_FILE`).
 - If the email says **FAILED** or has warnings, the message says why. Common ones: drive would be
   full, a source looked empty, too many deletions (use `--force` only if expected).
@@ -112,14 +132,26 @@ nothing to restart.
 
 | You change | Do this afterwards |
 |---|---|
-| `USB_UUID` (new drive) | `sudo ./install.sh` (the udev rule contains the UUID). A new empty drive does a full first sync; run it attended like step 4. |
-| Anything else (paths, excludes, snapshot count, notifications, DB settings...) | Nothing to reinstall. Check with `sudo ./preflight.sh` and `sudo ./backup.sh --dry-run`. |
+| `USB_UUID` (new drive) | `sudo bash ./install.sh` (the udev rule contains the UUID). A new empty drive does a full first sync; run it attended like step 4. |
+| Anything else (paths, excludes, snapshot count, notifications, DB settings...) | Nothing to reinstall. Check with `sudo bash ./preflight.sh` and `sudo bash ./backup.sh --dry-run`. |
 | `MOUNT_POINT` | Nothing to reinstall. The old folder stays behind: `sudo rmdir <old path>`. |
 | `IMMICH_EXCLUDE_DIRS` (adding a folder) | The next run **removes** that folder's contents from `current/`; older snapshots keep them until pruned. |
 
-`git pull` for new script versions: they apply immediately. Re-run `sudo ./install.sh` only if the
-files under `udev/` or `systemd/` changed. If a pulled `.env.example` gained new settings, copy
-them into your `.env` (missing ones fall back to defaults).
+## Updating
+
+As your normal user (no sudo): `cd /opt/immich-usb-backup && git pull`. New script versions apply
+immediately. Re-run `sudo bash ./install.sh` only if the files under `udev/` or `systemd/` changed.
+If a pulled `.env.example` gained new settings, copy them into your `.env` (missing ones fall back
+to defaults).
+
+If `git pull` complains about local changes to the `.sh` files and `git diff` shows only
+`old mode 100644 / new mode 100755`, an earlier `chmod +x` caused it. Tell git to ignore permission
+bits in this checkout and pull again (nothing is lost, the scripts don't need them):
+
+```bash
+git config core.fileMode false
+git pull
+```
 
 ---
 
@@ -139,9 +171,9 @@ What this project puts on your system, and nowhere else:
 
 ```bash
 cd /opt/immich-usb-backup
-sudo ./uninstall.sh                # trigger only: stops plugging in the drive from doing anything
-sudo ./uninstall.sh --purge        # + log, lock, mount-point folder, leftover test containers, failed-unit state
-sudo ./uninstall.sh --wipe-drive   # + FIRST deletes current/ and all snapshots from the drive
+sudo bash ./uninstall.sh                # trigger only: stops plugging in the drive from doing anything
+sudo bash ./uninstall.sh --purge        # + log, lock, mount-point folder, leftover test containers, failed-unit state
+sudo bash ./uninstall.sh --wipe-drive   # + FIRST deletes current/ and all snapshots from the drive
                                    #   (plug it in; you must type DELETE BACKUP to confirm)
 cd / && sudo rm -rf /opt/immich-usb-backup     # last: the repo and your .env
 ```
@@ -158,7 +190,7 @@ never touched by uninstalling. Without `--wipe-drive`, the backup stays on the d
 |---|---|
 | `.env.example` | Template for `.env` (copy it; `.env` is gitignored). |
 | `backup.sh` | The backup itself. Run by udev/systemd, or by hand. |
-| `lib.sh` | Small shared helpers, **sourced** by the other scripts (see below). Not run on its own; has no `#!` line and no exec bit on purpose. Must stay next to the scripts. |
+| `lib.sh` | Small shared helpers, **sourced** by the other scripts (see below). Not run on its own. Must stay next to the scripts. |
 | `install.sh` / `uninstall.sh` | Install or remove the udev rule and systemd unit (rendered from the two `.in` templates using `.env`). |
 | `preflight.sh` | Read-only health check; run after any OMV, Docker or Immich upgrade too. |
 | `verify-db-dump.sh` | Restore-tests a database dump in a throwaway container. |
@@ -200,7 +232,7 @@ Not proven until you do it:
 
 - The udev plug-in trigger (step 7).
 - Snapshot pruning (only happens once you have more than `SNAPSHOT_KEEP` snapshots).
-- Email delivery: confirm the first "done" email arrived, or run `sudo ./preflight.sh --notify-test`.
+- Email delivery: confirm the first "done" email arrived, or run `sudo bash ./preflight.sh --notify-test`.
 - A real restore onto fresh hardware (step 8). `verify-backup.sh --deep` shows every file and the
   database on the drive are intact and your stack files are there. It does not prove that Immich
   *boots* from them.

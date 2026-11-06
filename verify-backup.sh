@@ -4,11 +4,11 @@
 # full restore rehearsal). The drive is mounted READ-ONLY; nothing is written to the drive,
 # to Immich, or to Portainer.
 #
-#   sudo ./verify-backup.sh [--deep] [--skip-db]
+#   sudo bash ./verify-backup.sh [--deep] [--skip-db]
 #     --deep     also compare every file by checksum with the live library. Slow: it
 #                reads both disks completely (budget 1-2 hours per 200 GB). Use
 #                systemd-run so an SSH drop can't kill it:
-#                  sudo systemd-run --unit=immich-verify ./verify-backup.sh --deep
+#                  sudo systemd-run --unit=immich-verify /bin/bash "$PWD/verify-backup.sh" --deep
 #                  journalctl -fu immich-verify
 #     --skip-db  skip the database restore test (it takes a few minutes)
 #
@@ -26,7 +26,7 @@ for a in "$@"; do
   esac
 done
 
-[[ $EUID -eq 0 ]] || { echo "Run as root: sudo ./verify-backup.sh" >&2; exit 2; }
+[[ $EUID -eq 0 ]] || { echo "Run as root: sudo bash ./verify-backup.sh" >&2; exit 2; }
 [[ -r $ENV_FILE ]] || { echo "Missing $ENV_FILE" >&2; exit 2; }
 set -a; . "$ENV_FILE"; set +a
 MOUNT_POINT="${MOUNT_POINT:-/mnt/immich-usb-backup}"
@@ -117,9 +117,19 @@ for f in "$CUR"/portainer/compose/*/docker-compose.yml; do
   ok "Immich stack found: compose/$(basename "$d")/docker-compose.yml"
   if [[ -f $d/stack.env ]]; then
     ok "stack.env present next to it"
-    for k in UPLOAD_LOCATION DB_DATA_LOCATION DB_PASSWORD; do
-      grep -q "^$k=" "$d/stack.env" && ok "  $k is set" || wn "  $k not in stack.env (may be hard-coded in the compose file)"
-    done
+    missing_vars=()
+    used=0
+    while read -r ref; do
+      [[ $ref == *':-'* || $ref == *'-'* ]] && continue          # has a default value, fine
+      var="$(sed -E 's/^\$\{([A-Za-z_][A-Za-z0-9_]*).*/\1/' <<<"$ref")"
+      used=$((used + 1))
+      grep -q "^$var=" "$d/stack.env" || missing_vars+=("$var")
+    done < <(grep -o '\${[A-Za-z_][A-Za-z0-9_]*[^}]*}' "$f" | sort -u)
+    if (( ${#missing_vars[@]} )); then
+      wn "  used by the compose file but not in stack.env: ${missing_vars[*]} (set in Portainer's UI? then you must re-enter them on restore)"
+    else
+      ok "  all $used variables the compose file uses are defined in stack.env"
+    fi
     ver="$(sed -n 's/^IMMICH_VERSION=//p' "$d/stack.env" | head -n1)"
     echo "  IMMICH_VERSION=${ver:-<not set, image tag is in the compose file>}"
   else
@@ -127,6 +137,8 @@ for f in "$CUR"/portainer/compose/*/docker-compose.yml; do
   fi
   echo "  host paths this stack expects (they must exist, or be edited, on a restore machine):"
   grep -E '^\s*-\s+[^#]*:/' "$f" | grep -v -E '^\s*-\s+(/etc/localtime|/etc/timezone)' | sed 's/^/    /'
+  echo "  note: /dev/... lines are hardware (GPU, USB): remove them if the restore machine lacks them."
+  echo "        \${...} paths come from stack.env; named volumes (e.g. model-cache) are recreated automatically."
 done
 (( found )) || bad "no stack file mentioning Immich found under portainer/compose/"
 
@@ -178,7 +190,7 @@ if (( SKIP_DB )); then
   echo "(skipped the database restore test)"
 elif [[ -n ${newest:-} ]]; then
   sec "Database restore test on the newest dump from the drive"
-  if "$SCRIPT_DIR/verify-db-dump.sh" "$newest"; then ok "database dump restores cleanly"; else bad "database restore test failed"; fi
+  if bash "$SCRIPT_DIR/verify-db-dump.sh" "$newest"; then ok "database dump restores cleanly"; else bad "database restore test failed"; fi
 fi
 
 echo

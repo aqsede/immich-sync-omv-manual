@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Read-only checks. Changes nothing on the NAS, in Immich, or on the drive.
-#   sudo ./preflight.sh [--notify-test]
+#   sudo bash ./preflight.sh [--notify-test]
 # Run it before enabling anything, and again after an OMV/Immich/Docker upgrade.
 #
 set -uo pipefail
@@ -11,7 +11,7 @@ ENV_FILE="${ENV_FILE:-$SCRIPT_DIR/.env}"
 NOTIFY_TEST=0
 [[ ${1:-} == "--notify-test" ]] && NOTIFY_TEST=1
 
-[[ $EUID -eq 0 ]] || { echo "Run as root: sudo ./preflight.sh" >&2; exit 2; }
+[[ $EUID -eq 0 ]] || { echo "Run as root: sudo bash ./preflight.sh" >&2; exit 2; }
 [[ -r $ENV_FILE ]] || { echo "Missing $ENV_FILE" >&2; exit 2; }
 set -a; . "$ENV_FILE"; set +a
 IMMICH_EXCLUDE_DIRS="${IMMICH_EXCLUDE_DIRS-thumbs encoded-video}"
@@ -154,7 +154,7 @@ else
   real=""
 fi
 if [[ -f $RULE ]]; then
-  grep -q "$USB_UUID" "$RULE" && ok "udev rule installed and matches USB_UUID" || bad "udev rule UUID differs from .env: re-run ./install.sh"
+  grep -q "$USB_UUID" "$RULE" && ok "udev rule installed and matches USB_UUID" || bad "udev rule UUID differs from .env: re-run: sudo bash install.sh"
   if udevadm verify "$RULE" >/dev/null 2>&1; then ok "udev rule syntax valid"; else wn "udevadm verify unavailable or reported issues"; fi
   if [[ -n $real ]]; then
     wants="$(udevadm test --action=add "$(udevadm info -q path -n "$real")" 2>&1 | grep -o 'SYSTEMD_WANTS=[^ ]*' | head -n1)"

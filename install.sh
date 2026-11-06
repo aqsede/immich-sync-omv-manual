@@ -6,7 +6,7 @@ set -Eeuo pipefail
 REPO_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 ENV_FILE="${ENV_FILE:-$REPO_DIR/.env}"
 
-[[ $EUID -eq 0 ]] || { echo "Run as root: sudo ./install.sh" >&2; exit 1; }
+[[ $EUID -eq 0 ]] || { echo "Run as root: sudo bash ./install.sh" >&2; exit 1; }
 [[ -r $ENV_FILE ]] || { echo "Missing $ENV_FILE. Run: cp .env.example .env  and edit it." >&2; exit 1; }
 
 set -a; . "$ENV_FILE"; set +a
@@ -31,8 +31,6 @@ if [[ -n ${DB_DUMP_CONTAINER-immich_postgres} ]] && ! command -v docker >/dev/nu
   echo "WARNING: docker not found; the fresh DB dump step will be skipped."
 fi
 
-chmod +x "$REPO_DIR/backup.sh" "$REPO_DIR/preflight.sh" "$REPO_DIR/verify-db-dump.sh" "$REPO_DIR/verify-backup.sh" "$REPO_DIR/uninstall.sh"
-
 # ---- render + install -----------------------------------------------------
 sed "s|@@USB_UUID@@|$USB_UUID|g" \
   "$REPO_DIR/udev/99-immich-usb-backup.rules.in" > /etc/udev/rules.d/99-immich-usb-backup.rules
@@ -49,7 +47,7 @@ Installed.
   service   : /etc/systemd/system/immich-usb-backup.service  -> $REPO_DIR/backup.sh
 
 Next:
-  sudo $REPO_DIR/preflight.sh            # read-only health check of the whole setup
-  sudo $REPO_DIR/backup.sh --dry-run     # plug the drive in first; shows what would happen
+  sudo bash $REPO_DIR/preflight.sh       # read-only health check of the whole setup
+  sudo bash $REPO_DIR/backup.sh --dry-run # plug the drive in first; shows what would happen
   journalctl -fu immich-usb-backup       # watch a real run after plugging in
 MSG

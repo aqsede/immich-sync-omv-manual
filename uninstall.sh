@@ -2,10 +2,10 @@
 #
 # Removes what install.sh / backup.sh put on the system.
 #
-#   sudo ./uninstall.sh                 remove the udev rule and the systemd unit (the trigger)
-#   sudo ./uninstall.sh --purge         ... plus the log file, lock file, mount-point folder,
+#   sudo bash ./uninstall.sh                 remove the udev rule and the systemd unit (the trigger)
+#   sudo bash ./uninstall.sh --purge         ... plus the log file, lock file, mount-point folder,
 #                                       leftover test containers and failed-unit state
-#   sudo ./uninstall.sh --wipe-drive    FIRST delete current/ and all snapshots from the backup
+#   sudo bash ./uninstall.sh --wipe-drive    FIRST delete current/ and all snapshots from the backup
 #                                       drive (asks you to type a confirmation), then as above
 #
 # Your Immich, Portainer and the repo folder itself are never touched. The last lines
@@ -24,7 +24,7 @@ for a in "$@"; do
     *) echo "Unknown option: $a" >&2; exit 2 ;;
   esac
 done
-[[ $EUID -eq 0 ]] || { echo "Run as root: sudo ./uninstall.sh" >&2; exit 1; }
+[[ $EUID -eq 0 ]] || { echo "Run as root: sudo bash ./uninstall.sh" >&2; exit 1; }
 
 if systemctl is-active --quiet immich-usb-backup.service 2>/dev/null; then
   echo "A backup is running right now. Wait for it to finish (journalctl -fu immich-usb-backup)." >&2

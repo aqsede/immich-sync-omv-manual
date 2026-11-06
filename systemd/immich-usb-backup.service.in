@@ -5,7 +5,7 @@ After=local-fs.target docker.service
 
 [Service]
 Type=oneshot
-ExecStart=@@REPO_DIR@@/backup.sh
+ExecStart=/bin/bash @@REPO_DIR@@/backup.sh
 TimeoutStartSec=infinity
 Nice=10
 IOSchedulingClass=idle
