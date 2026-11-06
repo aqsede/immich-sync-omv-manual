@@ -1,0 +1,11 @@
+# Rendered by install.sh -> /etc/systemd/system/immich-usb-backup.service
+[Unit]
+Description=Immich USB backup (rsync mirror + btrfs snapshot)
+After=local-fs.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=@@REPO_DIR@@/backup.sh
+TimeoutStartSec=infinity
+Nice=10
+IOSchedulingClass=idle
