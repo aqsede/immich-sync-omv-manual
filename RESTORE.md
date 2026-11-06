@@ -23,6 +23,10 @@ Thumbnails and transcoded videos are intentionally not backed up; Immich rebuild
    (check each `<id>` folder; one is Immich) and paste them into a new stack in Portainer,
    but DO NOT deploy yet. Set `UPLOAD_LOCATION` and `DB_DATA_LOCATION` to fresh paths.
    Keep the same Immich version (`IMMICH_VERSION` in stack.env) for the restore; upgrade afterwards.
+   If the compose file mounts extra host folders (for example `thumbs`/`encoded-video` on an
+   SSD, or any other absolute path), create those folders on the new machine, or edit the
+   paths. They only hold data Immich can rebuild, but the folders must exist and be writable.
+   `verify-backup.sh` prints the list of host paths your stack expects.
 3. Copy the library into the new `UPLOAD_LOCATION`:
    `rsync -a /mnt/x/current/immich/ /path/to/UPLOAD_LOCATION/`
 4. Make sure all six folders exist, each with a `.immich` file, or Immich will refuse to

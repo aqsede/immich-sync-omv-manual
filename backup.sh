@@ -70,6 +70,7 @@ CUR=""
 log()  { printf '%s %s\n' "$(date '+%F %T')" "$*" | tee -a "$LOG_FILE"; }
 warn() { log "WARNING: $*"; WARNINGS+=("$*"); }
 hr()   { numfmt --to=iec --suffix=B "$1"; }
+join_by() { local sep="$1" out="" first=1 x; shift; for x in "$@"; do if (( first )); then out="$x"; first=0; else out+="$sep$x"; fi; done; printf '%s' "$out"; }
 
 notify() {  # notify <status> <message> [priority]
   local title="Immich USB backup: $1" body="$2" prio="${3:-default}"
@@ -99,6 +100,8 @@ do_unmount() {
 
 cleanup() { do_unmount || log "Could not unmount $MNT (busy?)"; }
 trap cleanup EXIT
+# make Ctrl-C / "systemctl stop" run the EXIT trap too, so the drive still gets unmounted
+trap 'log "Interrupted"; exit 143' TERM INT HUP
 
 die() {
   [[ $BASHPID -eq $$ ]] || exit 1   # inside a $(...) subshell: let the parent report it
@@ -293,10 +296,10 @@ if (( USED_PCT >= SPACE_WARN_PERCENT )); then
 fi
 
 ELAPSED=$(( $(date +%s) - START_TS ))
-MSG="Snapshot $SNAP_NAME. $(IFS='; '; echo "${SUMMARY[*]}"). Drive ${USED_PCT}% used, $(hr "$AVAIL_AFTER") free. Took $((ELAPSED / 60))m$((ELAPSED % 60))s."
+MSG="Snapshot $SNAP_NAME. $(join_by '; ' "${SUMMARY[@]}"). Drive ${USED_PCT}% used, $(hr "$AVAIL_AFTER") free. Took $((ELAPSED / 60))m$((ELAPSED % 60))s."
 
 if (( ${#WARNINGS[@]} )); then
-  MSG+=" WARNINGS: $(IFS=' | '; echo "${WARNINGS[*]}")"
+  MSG+=" WARNINGS: $(join_by ' | ' "${WARNINGS[@]}")"
 fi
 
 WAS_OURS=$MOUNTED_BY_US

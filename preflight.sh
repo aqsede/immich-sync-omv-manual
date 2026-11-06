@@ -95,7 +95,7 @@ for f in upload library thumbs encoded-video profile backups; do
   if [[ -e "$IMMICH_UPLOAD_LOCATION/$f/.immich" ]]; then
     :
   else
-    wn "no .immich marker in $IMMICH_UPLOAD_LOCATION/$f (folder unused or UPLOAD_LOCATION is wrong?)"
+    wn "no .immich marker in $IMMICH_UPLOAD_LOCATION/$f (OK if that folder is a separate mount, e.g. thumbs/encoded-video on an SSD; otherwise check UPLOAD_LOCATION)"
   fi
 done
 [[ -d $PORTAINER_DATA_DIR/compose ]] \

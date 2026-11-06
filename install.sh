@@ -31,7 +31,7 @@ if [[ -n ${DB_DUMP_CONTAINER-immich_postgres} ]] && ! command -v docker >/dev/nu
   echo "WARNING: docker not found; the fresh DB dump step will be skipped."
 fi
 
-chmod +x "$REPO_DIR/backup.sh" "$REPO_DIR/preflight.sh" "$REPO_DIR/verify-db-dump.sh"
+chmod +x "$REPO_DIR/backup.sh" "$REPO_DIR/preflight.sh" "$REPO_DIR/verify-db-dump.sh" "$REPO_DIR/verify-backup.sh" "$REPO_DIR/uninstall.sh"
 
 # ---- render + install -----------------------------------------------------
 sed "s|@@USB_UUID@@|$USB_UUID|g" \
