@@ -186,8 +186,24 @@ if (( NEEDED > AVAIL )); then
   die "New data will NOT fit on the drive: need ~$(hr "$NEEDED"), only $(hr "$AVAIL") free. Lower SNAPSHOT_KEEP, delete old snapshots, or use a bigger drive."
 fi
 
+explain_deletes() {  # which top-level folders the pending deletions come from
+  local name src dst out
+  for name in "${NAMES[@]}"; do
+    src="${SRC[$name]}"; dst="$CUR/$name"
+    [[ -d $dst ]] || continue
+    mapfile -t XARGS < <(extra_args "$name")
+    out="$(run_rsync "$src" "$dst" -n --itemize-changes "${XARGS[@]}" 2>/dev/null || true)"
+    grep '^\*deleting' <<<"$out" | sed -E 's/^\*deleting +//' \
+      | awk -F/ '{ c[$1]++ } END { for (k in c) printf "%d\t%s\n", c[k], k }' \
+      | sort -rn | head -n 8 \
+      | while IFS=$'\t' read -r n k; do log "    $name/$k: $n entries would be deleted"; done
+  done
+}
+
 if (( TOTAL_DEL > MAX_DELETE_FILES )) && (( ! FORCE )); then
-  die "Sync would delete $TOTAL_DEL files from the backup (limit $MAX_DELETE_FILES). If that is expected run: sudo bash $SCRIPT_DIR/backup.sh --force. If not, check the NAS filesystems are mounted."
+  log "Pending deletions by top-level folder (files and sub-folders):"
+  explain_deletes || true
+  die "Sync would delete $TOTAL_DEL files from the backup (limit $MAX_DELETE_FILES). See the folder list above. If you changed IMMICH_EXCLUDE_DIRS or removed/moved those folders on purpose, run once: sudo bash $SCRIPT_DIR/backup.sh --force (old snapshots keep the deleted copies). If you changed nothing, do NOT force: check the NAS filesystems are mounted."
 fi
 
 if (( DRY_RUN )); then
