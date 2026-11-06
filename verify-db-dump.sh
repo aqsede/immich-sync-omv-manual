@@ -39,8 +39,14 @@ fi
 gzip -t "$DUMP" || fail "$DUMP is not a valid gzip file"
 echo "Testing dump: $DUMP ($(numfmt --to=iec --suffix=B "$(stat -c %s "$DUMP")"))"
 
+DOCKER_ROOT="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)"
+AVAIL="$(df -B1 --output=avail "$DOCKER_ROOT" | tail -n1 | tr -d ' ')"
+NEED=$(( $(stat -c %s "$DUMP") * 10 ))
+(( AVAIL > NEED )) || fail "not enough free space for the scratch database on $DOCKER_ROOT (have $(numfmt --to=iec "$AVAIL"), want ~$(numfmt --to=iec "$NEED"))"
+
 IMAGE="$(docker inspect -f '{{.Config.Image}}' "$DB_DUMP_CONTAINER")"
-mapfile -t CMD < <(docker inspect -f '{{range .Config.Cmd}}{{println .}}{{end}}' "$DB_DUMP_CONTAINER")
+# sed drops the blank line docker inspect appends; an empty "" argument made postgres exit
+mapfile -t CMD < <(docker inspect -f '{{range .Config.Cmd}}{{println .}}{{end}}' "$DB_DUMP_CONTAINER" | sed '/^$/d')
 NAME="immich-restore-test-$$"
 
 cleanup() {
@@ -56,18 +62,26 @@ docker run -d --name "$NAME" --network none \
   "$IMAGE" "${CMD[@]}" >/dev/null
 
 echo -n "Waiting for it to initialise "
-for _ in $(seq 1 180); do
-  docker logs "$NAME" 2>&1 | grep -q 'init process complete' && break
-  echo -n "."; sleep 1
-done
-for _ in $(seq 1 60); do
-  docker exec "$NAME" pg_isready -U "$DB_DUMP_USER" -d "$DB_DUMP_DBNAME" >/dev/null 2>&1 && break
+ready=0
+for _ in $(seq 1 240); do
+  if [[ "$(docker inspect -f '{{.State.Running}}' "$NAME" 2>/dev/null)" != "true" ]]; then
+    echo
+    echo "--- container logs ---" >&2
+    docker logs "$NAME" 2>&1 | tail -n 25 >&2
+    fail "the throwaway Postgres container exited (logs above)"
+  fi
+  # TCP on loopback: the temporary init-time server only listens on a unix socket,
+  # so this only succeeds once the real server is up.
+  if docker exec "$NAME" pg_isready -h 127.0.0.1 -U "$DB_DUMP_USER" -d "$DB_DUMP_DBNAME" >/dev/null 2>&1; then
+    ready=1; break
+  fi
   echo -n "."; sleep 1
 done
 echo
-docker exec "$NAME" pg_isready -U "$DB_DUMP_USER" -d "$DB_DUMP_DBNAME" >/dev/null || fail "throwaway Postgres did not start (docker logs $NAME)"
+(( ready )) || { docker logs "$NAME" 2>&1 | tail -n 25 >&2; fail "throwaway Postgres did not become ready in 4 minutes"; }
+sleep 2
 
-echo "Restoring (single transaction, stops at first error) ..."
+echo "Restoring (single transaction, stops at first error). This can take several minutes and prints nothing meanwhile ..."
 gunzip --stdout "$DUMP" \
   | sed "s/SELECT pg_catalog.set_config('search_path', '', false);/SELECT pg_catalog.set_config('search_path', 'public, pg_catalog', true);/g" \
   | docker exec -i "$NAME" psql --dbname="$DB_DUMP_DBNAME" --username="$DB_DUMP_USER" \
