@@ -22,7 +22,7 @@ never needs sudo:
 ```bash
 sudo mkdir -p /opt/immich-usb-backup
 sudo chown "$USER": /opt/immich-usb-backup
-git clone <your-repo-url> /opt/immich-usb-backup
+git clone https://github.com/aqsede/immich-sync-omv-manual.git /opt/immich-usb-backup
 cd /opt/immich-usb-backup
 ```
 
