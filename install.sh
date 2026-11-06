@@ -31,7 +31,7 @@ if [[ -n ${DB_DUMP_CONTAINER-immich_postgres} ]] && ! command -v docker >/dev/nu
   echo "WARNING: docker not found; the fresh DB dump step will be skipped."
 fi
 
-chmod +x "$REPO_DIR/backup.sh"
+chmod +x "$REPO_DIR/backup.sh" "$REPO_DIR/preflight.sh" "$REPO_DIR/verify-db-dump.sh"
 
 # ---- render + install -----------------------------------------------------
 sed "s|@@USB_UUID@@|$USB_UUID|g" \
@@ -49,6 +49,7 @@ Installed.
   service   : /etc/systemd/system/immich-usb-backup.service  -> $REPO_DIR/backup.sh
 
 Next:
+  sudo $REPO_DIR/preflight.sh            # read-only health check of the whole setup
   sudo $REPO_DIR/backup.sh --dry-run     # plug the drive in first; shows what would happen
   journalctl -fu immich-usb-backup       # watch a real run after plugging in
 MSG

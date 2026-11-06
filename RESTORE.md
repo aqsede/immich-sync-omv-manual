@@ -4,7 +4,7 @@ Everything on this drive is plain files, readable from any Linux machine (btrfs)
 
 ```
 current/              latest mirror
-  immich/             library, upload, profile, backups  (thumbs/encoded-video are skipped on purpose)
+  immich/             library, upload, profile, backups (+ empty thumbs/ and encoded-video/ holding only .immich)
   portainer/          Portainer data: compose/<id>/docker-compose.yml + stack.env, portainer.db
   db-dumps/           fresh Immich database dumps (immich-db-*.sql.gz), newest = best
   LAST_SYNC.txt       when this was last synced
@@ -12,34 +12,53 @@ snapshots/<date>/     read-only point-in-time copies of current/ (use if latest 
 ```
 
 If the latest data looks wrong (corrupted/deleted photos), use the newest snapshot that
-looks good instead of `current/`. Mount: `mount UUID=<drive-uuid> /mnt/x`.
+looks good instead of `current/`. Mount it with `mount UUID=<drive-uuid> /mnt/x`.
+
+Thumbnails and transcoded videos are intentionally not backed up; Immich rebuilds them.
 
 ## Steps on a fresh machine
 
 1. Install OS/OMV, Docker and Portainer.
-2. Copy the library back to the same path used as `UPLOAD_LOCATION`:
+2. Recreate the stack. Open `portainer/compose/<id>/docker-compose.yml` and `stack.env`
+   (check each `<id>` folder; one is Immich) and paste them into a new stack in Portainer,
+   but DO NOT deploy yet. Set `UPLOAD_LOCATION` and `DB_DATA_LOCATION` to fresh paths.
+   Keep the same Immich version (`IMMICH_VERSION` in stack.env) for the restore; upgrade afterwards.
+3. Copy the library into the new `UPLOAD_LOCATION`:
    `rsync -a /mnt/x/current/immich/ /path/to/UPLOAD_LOCATION/`
-3. Get the stack back, either way:
-   - Open `portainer/compose/<id>/docker-compose.yml` and `stack.env` (check each `<id>`
-     folder, one of them is Immich) and recreate the stack in Portainer's web editor, or
-   - Stop Portainer, copy `portainer/` into Portainer's data dir, start Portainer.
-   Keep the same Immich version tag (`IMMICH_VERSION` in stack.env) for the restore;
-   upgrade afterwards.
-4. Restore the database. The database folder (`DB_DATA_LOCATION`) must start EMPTY.
-   Deploy the stack, then stop everything except the database container, and restore
-   the newest dump (this is Immich's documented method; check the current
-   "Backup and Restore" page at https://docs.immich.app if anything differs):
+4. Make sure all six folders exist, each with a `.immich` file, or Immich will refuse to
+   start ("Failed to read ... .immich"):
+   ```
+   cd /path/to/UPLOAD_LOCATION
+   for d in upload library thumbs encoded-video profile backups; do mkdir -p "$d"; [ -e "$d/.immich" ] || touch "$d/.immich"; done
+   ```
+5. Put a dump where Immich can see it: `cp /mnt/x/current/db-dumps/immich-db-XXXX.sql.gz /path/to/UPLOAD_LOCATION/backups/`
+   (the dumps made by Immich itself are already in `backups/` after step 3).
+6. Deploy the stack (empty database), open Immich in the browser. On the welcome screen
+   click **Restore from backup**, review the folder check, choose the dump (or use
+   **Select from computer** with a `.sql.gz` from `db-dumps/`) and restore.
+   (This is the web restore introduced in Immich v2.5.0; see "Backup and Restore" at
+   https://docs.immich.app if the screens differ in your version.)
+7. Log in, check albums, people and a few old photos. Then in Administration > Job Queues
+   run the missing Thumbnail Generation and Transcode Videos jobs.
 
-   ```
-   docker compose down -v      # or stop the stack in Portainer; empty DB_DATA_LOCATION
-   docker compose pull && docker compose create
-   docker start immich_postgres
-   sleep 10
-   gunzip --stdout /mnt/x/current/db-dumps/immich-db-XXXX.sql.gz \
-     | sed "s/SELECT pg_catalog.set_config('search_path', '', false);/SELECT pg_catalog.set_config('search_path', 'public, pg_catalog', true);/g" \
-     | docker exec -i immich_postgres psql --dbname=postgres --username=<DB_USERNAME>
-   docker compose up -d
-   ```
-5. Log in and check albums, people and a few old photos. Then in Immich:
-   Administration > Jobs, run the Thumbnail Generation and Transcode Videos jobs
-   (select "missing") to rebuild what was skipped.
+## Alternative: command-line restore (Immich's documented method)
+
+The database must be brand new (the Immich server must not have run yet). With the stack
+created but not started, and `DB_DATA_LOCATION` empty:
+
+```
+docker compose create             # or create the stack's containers without starting them
+docker start immich_postgres
+sleep 10
+gunzip --stdout /mnt/x/current/db-dumps/immich-db-XXXX.sql.gz \
+ | sed "s/SELECT pg_catalog.set_config('search_path', '', false);/SELECT pg_catalog.set_config('search_path', 'public, pg_catalog', true);/g" \
+ | docker exec -i immich_postgres psql --dbname=<DB_DATABASE_NAME> --username=<DB_USERNAME> --single-transaction --set ON_ERROR_STOP=on
+docker compose up -d
+```
+`<DB_USERNAME>` / `<DB_DATABASE_NAME>` are in stack.env (usually postgres / immich).
+
+## Notes
+
+- `portainer.db` is copied while Portainer runs, so treat it as best effort. The `compose/`
+  folders (plain text) are what you really need.
+- Test this procedure on a spare machine or VM before relying on it.

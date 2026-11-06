@@ -44,7 +44,8 @@ set +a
 MOUNT_POINT="${MOUNT_POINT:-/mnt/immich-usb-backup}"
 IMMICH_EXCLUDE_DIRS="${IMMICH_EXCLUDE_DIRS-thumbs encoded-video}"
 DB_DUMP_CONTAINER="${DB_DUMP_CONTAINER-immich_postgres}"
-DB_DUMP_USER="${DB_DUMP_USER:-postgres}"
+DB_DUMP_USER="${DB_DUMP_USER:-}"        # empty = auto-detect from the container
+DB_DUMP_DBNAME="${DB_DUMP_DBNAME:-}"    # empty = auto-detect from the container
 DB_DUMP_KEEP="${DB_DUMP_KEEP:-5}"
 DB_BACKUP_MAX_AGE_DAYS="${DB_BACKUP_MAX_AGE_DAYS:-3}"
 SNAPSHOT_KEEP="${SNAPSHOT_KEEP:-12}"
@@ -54,6 +55,9 @@ MAX_DELETE_FILES="${MAX_DELETE_FILES:-5000}"
 NOTIFY_WEBHOOK_URL="${NOTIFY_WEBHOOK_URL:-}"
 NOTIFY_EMAIL="${NOTIFY_EMAIL:-}"
 LOG_FILE="${LOG_FILE:-/var/log/immich-usb-backup.log}"
+
+# shellcheck source=lib.sh
+. "$SCRIPT_DIR/lib.sh"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 
@@ -75,7 +79,7 @@ notify() {  # notify <status> <message> [priority]
   fi
   if [[ -n $NOTIFY_EMAIL ]] && command -v sendmail >/dev/null 2>&1; then
     printf 'To: %s\nSubject: %s\n\n%s\n' "$NOTIFY_EMAIL" "$title" "$body" \
-      | sendmail -t >/dev/null 2>&1 || log "email notification failed"
+      | timeout 30 sendmail -t >/dev/null 2>&1 || log "email notification failed"
   fi
 }
 
@@ -146,25 +150,6 @@ fi
 declare -A SRC=( [immich]="$IMMICH_UPLOAD_LOCATION" [portainer]="$PORTAINER_DATA_DIR" )
 NAMES=(immich portainer)
 
-extra_args() {  # one rsync argument per line
-  case "$1" in
-    immich) for d in $IMMICH_EXCLUDE_DIRS; do printf -- '--exclude=/%s/\n' "$d"; done ;;
-  esac
-}
-
-run_rsync() {  # run_rsync <src> <dst> [extra rsync args...]
-  local src="$1" dst="$2" rc=0
-  shift 2
-  LC_ALL=C rsync -aH --numeric-ids --delete --delete-excluded --stats "$@" "$src/" "$dst/" || rc=$?
-  [[ $rc -eq 0 || $rc -eq 24 ]] || return "$rc"   # 24 = files vanished mid-transfer, fine
-}
-
-stat_num() {  # stat_num "<Label>" "<rsync output>"  -> integer (0 if absent)
-  local v
-  v="$(grep -m1 "^$1:" <<<"$2" | sed -E 's/^[^:]+: ([0-9,]+).*/\1/' | tr -d ',' || true)"
-  echo "${v:-0}"
-}
-
 log "Planning (dry run of rsync) ..."
 TOTAL_NEW=0
 TOTAL_DEL=0
@@ -182,8 +167,10 @@ for name in "${NAMES[@]}"; do
     out="$(run_rsync "$src" "$empty" -n "${XARGS[@]}")" || { rmdir "$empty"; die "Planning rsync failed for $name"; }
     rmdir "$empty"
   fi
-  new_b="$(stat_num 'Total transferred file size' "$out")"
-  del_n="$(stat_num 'Number of deleted files' "$out")"
+  new_b="$(require_stat 'Total transferred file size' "$out")" \
+    || die "Could not read rsync statistics for $name (unexpected rsync output). Run ./preflight.sh"
+  del_n="$(require_stat 'Number of deleted files' "$out")" \
+    || die "Could not read rsync statistics for $name (unexpected rsync output). Run ./preflight.sh"
   log "  $name: $(hr "$new_b") to copy, $del_n files to delete from the drive copy"
   TOTAL_NEW=$(( TOTAL_NEW + new_b ))
   TOTAL_DEL=$(( TOTAL_DEL + del_n ))
@@ -214,14 +201,18 @@ dump_database() {
     warn "Container '$DB_DUMP_CONTAINER' is not running, skipping fresh DB dump"
     return 1
   fi
+  detect_db_settings
   local dir="$CUR/db-dumps" ts out tmp
   mkdir -p "$dir"
   ts="$(date +%Y-%m-%d_%H%M%S)"
   out="$dir/immich-db-$ts.sql.gz"
   tmp="$out.partial"
-  log "Dumping Immich database from '$DB_DUMP_CONTAINER' ..."
-  if docker exec "$DB_DUMP_CONTAINER" pg_dumpall --clean --if-exists --username="$DB_DUMP_USER" \
-       | gzip > "$tmp" && gzip -t "$tmp" && [[ -s $tmp ]]; then
+  log "Dumping database '$DB_DUMP_DBNAME' (user '$DB_DUMP_USER') from '$DB_DUMP_CONTAINER' ..."
+  # Same command Immich documents (pg_dump, one database). No -t: a TTY would corrupt the pipe.
+  if docker exec "$DB_DUMP_CONTAINER" pg_dump --clean --if-exists \
+       --dbname="$DB_DUMP_DBNAME" --username="$DB_DUMP_USER" | gzip > "$tmp" \
+     && gzip -t "$tmp" && [[ -s $tmp ]] \
+     && gzip -dc "$tmp" | tail -c 400 | grep -q 'PostgreSQL database dump complete'; then
     mv "$tmp" "$out"
     log "DB dump written: $(basename "$out") ($(hr "$(stat -c %s "$out")"))"
     find "$dir" -maxdepth 1 -name 'immich-db-*.sql.gz' -printf '%T@ %p\n' \
@@ -256,6 +247,16 @@ for name in "${NAMES[@]}"; do
   log "  $name done: $new_files files / $(hr "$new_b") copied, $del_n deleted"
   SUMMARY+=("$name: +$new_files files ($(hr "$new_b")), -$del_n")
 done
+
+missing_markers=()
+for f in upload library thumbs encoded-video profile backups; do
+  if [[ -e "$IMMICH_UPLOAD_LOCATION/$f/.immich" && ! -e "$CUR/immich/$f/.immich" ]]; then
+    missing_markers+=("$f")
+  fi
+done
+if (( ${#missing_markers[@]} )); then
+  warn "Immich .immich marker missing in the backup for: ${missing_markers[*]} (a restored Immich may refuse to start, see RESTORE.md)"
+fi
 
 cp -f "$SCRIPT_DIR/RESTORE.md" "$MNT/README-RESTORE.md" 2>/dev/null || true
 {
